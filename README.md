@@ -26,6 +26,13 @@ python -m contract_rag.app --llm-provider openai
 - `eval/` – sample dataset and runner
 - `utils/` – text normalization and citation helpers
 
+### Agents 🤖
+- Router: orchestrates retrieval, answering, risk scoring, and legal analysis.
+- Answerer: grounded Q&A (prefers local HF model, can use OpenAI, falls back to extractive snippets).
+- Legal Analyst: converts clauses into structured legal meaning and presents only populated fields.
+- Risk scorer: rule-based risk flags on top retrieved evidence.
+- Synthesizer: formats output as Assistant answer → Legal analysis → Risk flags → Citations.
+
 ## Architecture 🧠
 
 The system follows a multi-agent RAG architecture with clear separation of concerns:
@@ -87,8 +94,18 @@ python -m contract_rag.app
 
 ## Behavior 📑
 - Retrieval: heading-aware clause chunks + hybrid vector/BM25 with reciprocal-rank fusion.
+- Assistant answer shown first, followed by Legal analysis (if populated), Risk flags, then Citations.
 - Risk flags: run on every query by default (`RAG_ALWAYS_RISK=true`); shows severity-tagged findings under “Risk flags”.
+- Legal Analyst Agent: structures clauses into JSON (clause type, obligations, liability, governing law, survival, risk signals) and renders only populated fields. Toggle with `RAG_ENABLE_LEGAL_ANALYST=true|false`.
 - Citations: show doc + section for each chunk used.
+
+## Flow 🪄
+1. Router detects intent (QA vs risk scan) and reuses retrieval for all agents.
+2. Retrieval + rerank gather the top evidence chunks.
+3. Answerer generates the grounded reply (or extractive fallback).
+4. Legal Analyst (if enabled) structures obligations/liability/governing law/survival from the same evidence.
+5. Risk scorer flags heuristic risks.
+6. Synthesizer orders output: Assistant answer → Legal analysis → Risk flags → Citations.
 
 ## Evaluation 🧪
 ```bash

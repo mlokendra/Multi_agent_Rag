@@ -29,7 +29,7 @@ def main() -> None:
     args = parser.parse_args()
 
     memory = MemoryStore()
-    retriever = Retriever(backend=LocalHybridBackend())
+    retriever = Retriever()#(backend=LocalHybridBackend())
     # Pass provider choice down to Answerer via Router
     router = Router(retriever=retriever, llm_provider=args.llm_provider)
 

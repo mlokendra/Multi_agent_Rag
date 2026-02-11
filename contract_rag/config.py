@@ -57,6 +57,8 @@ class Settings:
     hf_top_p: float = float(os.getenv("HF_TOP_P", "0.9"))
     # Risk
     always_compute_risks: bool = os.getenv("RAG_ALWAYS_RISK", "true").lower() == "true"
+    # Legal analyst
+    enable_legal_analyst: bool = os.getenv("RAG_ENABLE_LEGAL_ANALYST", "true").lower() == "true"
     # Paths
     cache_dir: Path = Path(os.getenv("RAG_CACHE_DIR", Path(__file__).resolve().parent / "tmp"))
 

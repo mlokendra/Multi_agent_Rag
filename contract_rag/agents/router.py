@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from contract_rag.agents.answerer import Answerer
+from contract_rag.agents.legal_analyst import LegalAnalyst
 from contract_rag.agents.retriever import Retriever
 from contract_rag.agents.reranker import Reranker
 from contract_rag.agents.risk_scorer import RiskScorer
@@ -41,6 +42,7 @@ class Router:
         answerer: Optional[Answerer] = None,
         reranker: Optional[Reranker] = None,
         risk_scorer: Optional[RiskScorer] = None,
+        legal_analyst: Optional[LegalAnalyst] = None,
         synthesizer: Optional[Synthesizer] = None,
         llm_provider: Optional[str] = None,
     ) -> None:
@@ -52,6 +54,11 @@ class Router:
             preferred_provider=llm_provider,
         )
         self.risk_scorer = risk_scorer or RiskScorer()
+        self.legal_analyst = legal_analyst or LegalAnalyst(
+            retriever=self.retriever,
+            reranker=self.reranker,
+            preferred_provider=llm_provider,
+        )
         self.synthesizer = synthesizer or Synthesizer()
 
     @staticmethod
@@ -92,5 +99,9 @@ class Router:
         if decision.intent.constraints.get("risk") is True or settings.always_compute_risks:
             risks = self.risk_scorer.analyze(query=query, evidence=evidence[:10])
 
-        output = self.synthesizer.format(answer=answer, risks=risks)
+        legal_analysis = None
+        if settings.enable_legal_analyst:
+            legal_analysis = self.legal_analyst.analyze(query=query, evidence=evidence[:8])
+
+        output = self.synthesizer.format(answer=answer, risks=risks, legal_analysis=legal_analysis)
         return output.render()

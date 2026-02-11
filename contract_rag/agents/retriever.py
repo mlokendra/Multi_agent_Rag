@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Dict, List, Optional
+
+from contract_rag.config import settings
+from contract_rag.retrieval.retriever import HybridRetriever, RetrievedChunk
 
 
 @dataclass(frozen=True)
@@ -18,27 +21,14 @@ class EvidenceChunk:
     metadata: Dict[str, Any] | None = None
 
 
-class SearchBackend(Protocol):
-    """
-    Plug your real vector DB / hybrid search here.
-
-    Must return a list of dicts with at least:
-      - chunk_id, doc_id, doc_label, section_path, text, score
-    """
-    def search(self, query: str, top_k: int, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]: ...
-
-
 class Retriever:
     """
-    Retrieves candidate evidence chunks for a query.
-
-    This class is intentionally backend-agnostic.
-    You can adapt it to Chroma/FAISS/BM25, etc.
+    Retrieves candidate evidence chunks for a query using the core HybridRetriever logic.
     """
 
-    def __init__(self, backend: SearchBackend | None = None, default_top_k: int = 10) -> None:
-        self.backend = backend
-        self.default_top_k = default_top_k
+    def __init__(self, hybrid: HybridRetriever | None = None, default_top_k: int | None = None) -> None:
+        self.hybrid = hybrid or HybridRetriever()
+        self.default_top_k = default_top_k or settings.top_k
 
     def retrieve(
         self,
@@ -46,24 +36,22 @@ class Retriever:
         top_k: int | None = None,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[EvidenceChunk]:
-        if self.backend is None:
-            # Safe fallback so system doesn't crash while wiring backend.
-            return []
-
         k = top_k or self.default_top_k
-        rows = self.backend.search(query=query, top_k=k, filters=filters)
+        hits: List[RetrievedChunk] = self.hybrid.retrieve(query, k=k)
 
         chunks: List[EvidenceChunk] = []
-        for r in rows:
+        for h in hits:
+            doc_label = h.chunk.source
+            doc_id = doc_label.split(" §", 1)[0]
             chunks.append(
                 EvidenceChunk(
-                    chunk_id=str(r.get("chunk_id", "")),
-                    doc_id=str(r.get("doc_id", "")),
-                    doc_label=str(r.get("doc_label", r.get("doc_id", ""))),
-                    section_path=str(r.get("section_path", "")),
-                    text=str(r.get("text", "")),
-                    score=float(r.get("score", 0.0)),
-                    metadata=dict(r.get("metadata", {}) or {}),
+                    chunk_id=h.chunk.id,
+                    doc_id=doc_id,
+                    doc_label=doc_label,
+                    section_path=h.chunk.section_number or "",
+                    text=h.chunk.text,
+                    score=h.score,
+                    metadata={"vector_score": h.vector_score, "bm25_score": h.bm25_score},
                 )
             )
         return chunks
