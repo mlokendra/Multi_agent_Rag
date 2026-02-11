@@ -1,39 +1,96 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
-from contract_rag.agents.answer import AnswerAgent
-from contract_rag.agents.risk import RiskAgent
-
+from contract_rag.agents.answerer import Answerer
+from contract_rag.agents.retriever import Retriever
+from contract_rag.agents.reranker import Reranker
+from contract_rag.agents.risk_scorer import RiskScorer
+from contract_rag.agents.synthesizer import Synthesizer
+from contract_rag.config import settings
 
 @dataclass
 class RouterDecision:
     route: str
     reason: str
+    intent: "RouterIntent"
+
+
+@dataclass
+class RouterIntent:
+    intent: str  # qa, clause_lookup, compare_conflicts, risk_scan, summarize_risks
+    targets: List[str] = field(default_factory=lambda: ["all_docs"])
+    constraints: Dict[str, bool | str] = field(default_factory=dict)
 
 
 class Router:
-    def __init__(self, answer_agent: AnswerAgent | None = None, risk_agent: RiskAgent | None = None) -> None:
-        self.answer_agent = answer_agent or AnswerAgent()
-        self.risk_agent = risk_agent or RiskAgent(self.answer_agent.retriever)
+    """
+    Thin orchestration layer:
+      - determines intent
+      - executes retrieval + answer
+      - optionally runs risk scoring
+      - formats output
+
+    This stays deterministic and testable.
+    """
+
+    def __init__(
+        self,
+        retriever: Retriever,
+        answerer: Optional[Answerer] = None,
+        reranker: Optional[Reranker] = None,
+        risk_scorer: Optional[RiskScorer] = None,
+        synthesizer: Optional[Synthesizer] = None,
+        llm_provider: Optional[str] = None,
+    ) -> None:
+        self.retriever = retriever
+        self.reranker = reranker or Reranker()
+        self.answerer = answerer or Answerer(
+            retriever=self.retriever,
+            reranker=self.reranker,
+            preferred_provider=llm_provider,
+        )
+        self.risk_scorer = risk_scorer or RiskScorer()
+        self.synthesizer = synthesizer or Synthesizer()
 
     @staticmethod
     def _is_risk_query(query: str) -> bool:
         q = query.lower()
-        triggers = ["risk", "liability", "indemn", "breach", "termination", "penalty"]
+        # Expanded triggers include simple synonyms and plural/non-stem variants
+        triggers = [
+            "risk", "exposure", "hazard",
+            "liability", "liabilities", "uncapped", "unlimited", "cap", "capped",
+            "indemn", "indemnify", "indemnity", "hold harmless",
+            "breach", "violation",
+            "termination", "terminate", "terminating", "cancel", "cancellation", "notice period",
+            "penalty", "penalties", "fine",
+            "damages", "loss", "losses",
+            "service credit", "uptime", "sla",
+            "data breach", "security incident",
+        ]
         return any(t in q for t in triggers)
 
     def route(self, query: str) -> RouterDecision:
         if self._is_risk_query(query):
-            return RouterDecision(route="risk", reason="Risk-related keywords present")
-        return RouterDecision(route="answer", reason="Default factual Q&A")
+            intent = RouterIntent(intent="risk_scan", targets=["all_docs"], constraints={"risk": True})
+            return RouterDecision(route="risk", reason="Risk-related keywords present", intent=intent)
+
+        intent = RouterIntent(intent="qa", targets=["all_docs"], constraints={"risk": False})
+        return RouterDecision(route="answer", reason="Default factual Q&A", intent=intent)
 
     def handle(self, query: str) -> str:
         decision = self.route(query)
-        if decision.route == "risk":
-            findings = self.risk_agent.analyze(query)
-            if not findings:
-                return "No specific risks detected in the retrieved context."
-            lines = [f"- {f.title}: {f.detail} (source: {f.chunk_source})" for f in findings]
-            return "\n".join(lines)
-        return self.answer_agent.answer(query)
+
+        # Retrieve evidence once; reuse for answer + risk (important for efficiency & grounding)
+        evidence = self.retriever.retrieve(query, top_k=30)
+        evidence = self.reranker.rerank(query, evidence)
+
+        answer = self.answerer.answer(query)
+
+        risks = []
+        if decision.intent.constraints.get("risk") is True or settings.always_compute_risks:
+            risks = self.risk_scorer.analyze(query=query, evidence=evidence[:10])
+
+        output = self.synthesizer.format(answer=answer, risks=risks)
+        return output.render()

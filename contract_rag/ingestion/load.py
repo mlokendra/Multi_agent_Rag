@@ -60,7 +60,8 @@ def load_documents(data_dir: Path) -> List[Dict[str, str]]:
         if ext not in SUPPORTED_EXTS:
             continue
         text = READERS[ext](path)
-        text = normalize_text(text)
+        # Preserve paragraph breaks for heading detection; later steps can flatten.
+        text = normalize_text(text, keep_newlines=True)
         if not text:
             logger.warning("No text extracted from %s", path.name)
             continue

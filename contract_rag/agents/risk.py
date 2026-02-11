@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict
 
 from contract_rag.retrieval.retriever import HybridRetriever
 
@@ -11,17 +11,18 @@ class RiskFinding:
     title: str
     detail: str
     chunk_source: str
+    severity: str
 
 
 class RiskAgent:
     """Very lightweight risk highlighter using keyword heuristics + retrieval."""
 
-    risk_terms = {
-        "liability": "Check liability caps and exclusions.",
-        "indemn": "Indemnification scope or carve-outs detected.",
-        "termination": "Termination rights/notice period referenced.",
-        "confidential": "Confidentiality obligations found.",
-        "sla": "Service levels or remedies mentioned.",
+    risk_terms: Dict[str, Dict[str, str]] = {
+        "liability": {"hint": "Check liability caps and exclusions.", "severity": "high"},
+        "indemn": {"hint": "Indemnification scope or carve-outs detected.", "severity": "high"},
+        "termination": {"hint": "Termination rights/notice period referenced.", "severity": "medium"},
+        "confidential": {"hint": "Confidentiality obligations found.", "severity": "medium"},
+        "sla": {"hint": "Service levels or remedies mentioned.", "severity": "medium"},
     }
 
     def __init__(self, retriever: HybridRetriever | None = None) -> None:
@@ -32,13 +33,14 @@ class RiskAgent:
         findings: List[RiskFinding] = []
         for res in results:
             text_lower = res.chunk.text.lower()
-            for term, hint in self.risk_terms.items():
+            for term, info in self.risk_terms.items():
                 if term in text_lower:
                     findings.append(
                         RiskFinding(
                             title=term.capitalize(),
-                            detail=f"{hint} Example: {res.chunk.text[:180]}...",
+                            detail=f"{info['hint']} Example: {res.chunk.text[:180]}...",
                             chunk_source=res.chunk.source,
+                            severity=info["severity"],
                         )
                     )
         return findings

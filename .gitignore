@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+env/
+venv/
+.ipynb_checkpoints
+
+# Environment / secrets
+.env
+
+# Editors / OS
+.DS_Store
+*.swp
+
+# Local data / cache
+contract_rag/tmp/
+.cache/
+.huggingface/
+*.log
+
+# Model weights (do not commit large downloads)
+*.bin
+*.safetensors
+*.onnx
+*.pt
+
+# Build / misc
+dist/
+build/
