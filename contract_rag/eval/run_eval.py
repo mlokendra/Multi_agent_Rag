@@ -123,7 +123,13 @@ def main() -> None:
     parser = build_cli()
     args = parser.parse_args()
 
-    retriever = Retriever(backend=LocalHybridBackend())
+    retriever = Retriever()
+    # Prepare hybrid retriever index (may download/compute embeddings).
+    try:
+        retriever.hybrid.prepare()
+    except Exception:
+        # Fallback: HybridRetriever will lazily prepare on first retrieve call
+        pass
     router = Router(retriever=retriever, llm_provider=args.llm_provider)
     
     scores: List[EvalScore] = []
@@ -147,10 +153,20 @@ def main() -> None:
         
         resp_text = router.handle(query)
         
-        # Parse the response to extract answer and citations
-        # Assuming synthesizer.render() format
-        lines = resp_text.split("\n")
-        system_answer = lines[0].strip() if lines else ""
+        # Parse the response produced by Synthesizer.render()
+        # Expected sections: Assistant answer:, Legal analysis:, Risk flags:, Citations:
+        def _extract_assistant_answer(text: str) -> str:
+            # Try to extract the block after 'Assistant answer:' up to next section
+            m = re.search(r"Assistant answer:\n(?P<ans>.*?)(?:\n\n|\nLegal analysis:|\nRisk flags:|\nCitations:|\Z)", text, flags=re.DOTALL)
+            if m:
+                return m.group("ans").strip()
+            # Fallback: first non-empty line
+            for line in text.splitlines():
+                if line.strip():
+                    return line.strip()
+            return ""
+
+        system_answer = _extract_assistant_answer(resp_text)
         has_citations = "Citations:" in resp_text
         
         # Try to extract evidence_sufficiency from the response
